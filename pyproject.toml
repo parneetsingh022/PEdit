@@ -3,7 +3,7 @@
 requires = ["setuptools>=70", "setuptools-scm"]
 
 [project]
-name = "image_editor"
+name = "PEdit"
 dynamic = ["version"]
 
 [tool.setuptools_scm]

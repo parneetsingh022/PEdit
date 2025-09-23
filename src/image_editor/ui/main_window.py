@@ -1,8 +1,17 @@
 import sys
 
-from PySide6.QtCore import QSize, Qt
-from PySide6.QtWidgets import QMainWindow, QMenu
+from PySide6.QtCore import QSize, Qt, qVersion
+from PySide6.QtWidgets import QMainWindow, QMenu, QMessageBox
 from PySide6.QtGui import QAction 
+import platform
+import PySide6
+
+# Import package metadata (safe fallback if package not installed editable mode)
+try:
+    from image_editor import __version__, __project__
+except Exception:  # pragma: no cover - fallback
+    __version__ = "unknown"
+    __project__ = "image_editor"
 from .menu_bar import MainMenu, MENU_SPEC, MENU_STYLESHEET
 
 
@@ -14,3 +23,55 @@ class MainWindow(QMainWindow):
         self.resize(1000,800)
 
         menu_bar, register = MainMenu.create_menu(self, MENU_SPEC, stylesheet=MENU_STYLESHEET)
+
+    # ---- Menu action slots -------------------------------------------------
+    def on_about(self):
+        """Show an About dialog with version & environment info (like VS Code)."""
+        # Collect extended metadata if available
+        homepage = None
+        try:  # Attempt to get Home-page from distribution metadata
+            from importlib.metadata import metadata
+            meta = metadata(__project__)
+            homepage = meta.get("Home-page") or meta.get("Project-URL")
+        except Exception:
+            pass
+
+        qt_version = None
+        try:
+            qt_version = qVersion()
+        except Exception:
+            qt_version = "unknown"
+
+        info_rows = [
+            ("Product", __project__),
+            ("Version", __version__),
+            ("PySide6", PySide6.__version__),
+            ("Qt", qt_version),
+            ("Python", platform.python_version()),
+            ("Platform", platform.platform()),
+        ]
+
+        # Build HTML table for nice alignment
+        rows_html = "".join(
+            f"<tr><td style='padding:2px 8px;font-weight:600;' align='right'>{label}:</td>"
+            f"<td style='padding:2px 4px;'>{value}</td></tr>" for label, value in info_rows
+        )
+        links_html = f"<p><a href='{homepage}' style='color:#6aa9ff;text-decoration:none;'>{homepage}</a></p>" if homepage else ""
+
+        html = f"""
+        <div style='font-family:Segoe UI,Arial,sans-serif;font-size:12px;'>
+          <h3 style='margin:0 0 6px 0;'>{__project__}</h3>
+          <table style='border-collapse:collapse;'>{rows_html}</table>
+          {links_html}
+          <p style='margin-top:8px;color:#888;'>© {platform.node()} – Running in {platform.system()} environment.</p>
+          <p style='margin-top:4px;'>Press Ctrl+Q to exit the application.</p>
+        </div>
+        """
+
+        # Use QMessageBox for simplicity (could be upgraded to custom QDialog later)
+        box = QMessageBox(self)
+        box.setWindowTitle(f"About {__project__}")
+        box.setTextFormat(Qt.RichText)
+        box.setText(html)
+        box.setStandardButtons(QMessageBox.Ok)
+        box.exec()
