@@ -1,3 +1,12 @@
-from . import __version__
+from .ui.main_window import MainWindow
+from PySide6.QtWidgets import QApplication
+import sys
 
-print(__version__)
+
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+
+    window = MainWindow()
+    window.show()
+
+    app.exec()
