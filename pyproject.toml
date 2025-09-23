@@ -1,0 +1,11 @@
+# pyproject.toml
+[build-system]
+requires = ["setuptools>=70", "setuptools-scm"]
+
+[project]
+name = "image_editor"
+dynamic = ["version"]
+
+[tool.setuptools_scm]
+version_scheme = "guess-next-dev"
+local_scheme = "node-and-date"
