@@ -8,7 +8,7 @@ import PySide6
 
 # Import package metadata (safe fallback if package not installed editable mode)
 try:
-    from image_editor import __version__, __project__
+    from pedit import __version__, __project__
 except Exception:  # pragma: no cover - fallback
     __version__ = "unknown"
     __project__ = "image_editor"
@@ -63,7 +63,6 @@ class MainWindow(QMainWindow):
           <h3 style='margin:0 0 6px 0;'>{__project__}</h3>
           <table style='border-collapse:collapse;'>{rows_html}</table>
           {links_html}
-          <p style='margin-top:8px;color:#888;'>© {platform.node()} – Running in {platform.system()} environment.</p>
           <p style='margin-top:4px;'>Press Ctrl+Q to exit the application.</p>
         </div>
         """
