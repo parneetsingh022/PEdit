@@ -1,28 +1,43 @@
 import sys
 
 from PySide6.QtCore import QSize, Qt, qVersion
-from PySide6.QtWidgets import QMainWindow, QMenu, QMessageBox
+from PySide6.QtWidgets import (
+    QMainWindow, QMenu, QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QSizePolicy
+)
 from PySide6.QtGui import QAction 
 import platform
 import PySide6
+from .side_pane import SidePane
 
 # Import package metadata (safe fallback if package not installed editable mode)
 try:
     from pedit import __version__, __project__
 except Exception:  # pragma: no cover - fallback
     __version__ = "unknown"
-    __project__ = "image_editor"
+    __project__ = "imdge_editor"
 from .menu_bar import MainMenu, MENU_SPEC, MENU_STYLESHEET
-
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        container = QWidget()
 
         self.setWindowTitle("PEdit")
         self.resize(1000,800)
+        side_pane = SidePane()
+        # Layout: only the side pane + an expanding empty space (stretch).
+        # SidePane already has QSizePolicy.Fixed (W) / Expanding (H) so it will
+        # occupy full vertical height of the central area.
+        main_layout = QHBoxLayout(container)
+        main_layout.setContentsMargins(0,0,0,0)
+        main_layout.setSpacing(0)
+        main_layout.addWidget(side_pane)
+        main_layout.addStretch(1)
 
-        menu_bar, register = MainMenu.create_menu(self, MENU_SPEC, stylesheet=MENU_STYLESHEET)
+        MainMenu.create_menu(self, MENU_SPEC, stylesheet=MENU_STYLESHEET)
+
+        self.setCentralWidget(container)
 
     # ---- Menu action slots -------------------------------------------------
     def on_about(self):
