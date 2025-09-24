@@ -220,34 +220,34 @@ class _ImageCanvasTabWidget(QTabWidget):
 
         # Styling (no explicit close-button image so default icon shows)
         self.setStyleSheet(
-            """
-            QTabWidget::pane { border: 0; }
-            QTabBar::tab {
-                background: #2d2d2d;
-                color: #d0d0d0;
+            f"""
+            QTabWidget::pane {{ border: 0; }}
+            QTabBar::tab {{
+                background: {color_theme.COLOR_SURFACE};
+                color: {color_theme.COLOR_TEXT_SECONDARY};
                 padding: 5px 14px;
-                border: 1px solid #3f3f3f;
-                border-bottom: 2px solid #1e1e1e;
+                border: 1px solid {color_theme.COLOR_BORDER};
+                border-bottom: 2px solid {color_theme.COLOR_BACKGROUND_DEEP};
                 border-top-left-radius: 6px;
                 border-top-right-radius: 6px;
                 margin-right: 2px;
                 font-size: 12px;
-            }
-            QTabBar::tab:selected {
-                background: #3a3a3a;
-                color: #ffffff;
-                border-bottom: 2px solid #4aa3ff;
-            }
-            QTabBar::tab:!selected:hover { background: #353535; }
+            }}
+            QTabBar::tab:selected {{
+                background: {color_theme.COLOR_SURFACE_LIGHT};
+                color: {color_theme.COLOR_TEXT_PRIMARY};
+                border-bottom: 2px solid {color_theme.COLOR_PRIMARY};
+            }}
+            QTabBar::tab:!selected:hover {{ background: {color_theme.COLOR_SURFACE_LIGHT}; }}
             /* Plus tab appearance */
-            QTabBar::tab:last {
+            QTabBar::tab:last {{
                 min-width: 34px;
                 max-width: 34px;
                 text-align: center;
                 font-weight: 600;
-                color: #5ec6ff;
-            }
-            QTabBar::tab:last:selected { border-bottom: 2px solid #5ec6ff; }
+                color: {color_theme.COLOR_PRIMARY};
+            }}
+            QTabBar::tab:last:selected {{ border-bottom: 2px solid {color_theme.COLOR_PRIMARY}; }}
             """
         )
 
