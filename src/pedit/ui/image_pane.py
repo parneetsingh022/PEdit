@@ -1,8 +1,9 @@
 
 from PySide6.QtCore import Qt, QRect, QSize, Signal, QSignalBlocker  
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout,
-    QSizePolicy, QTabWidget, QTabBar, QInputDialog, QPushButton, QToolButton
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
+    QSizePolicy, QTabWidget, QTabBar, QInputDialog, QPushButton, QToolButton,
+    QDialog, QLineEdit, QLabel, QScrollArea, QFrame
 )
 # Remove this line; use Signal from PySide6.QtCore instead.
 
@@ -114,6 +115,189 @@ class ImageCanvas(QWidget):
         super().resizeEvent(event)
 
 
+class _AspectPreview(QFrame):
+    """Clickable preview card representing an aspect ratio visually."""
+    clicked = Signal(object)  # emits self when selected
+    def __init__(self, ratio: tuple[int, int], theme, parent=None):
+        super().__init__(parent)
+        self.ratio = ratio
+        self.theme = theme
+        self.setCursor(Qt.PointingHandCursor)
+        self.setMinimumSize(88, 74)
+        self.setMaximumWidth(110)
+        self.setFrameShape(QFrame.StyledPanel)
+        self.setFrameShadow(QFrame.Plain)
+        self._selected = False
+        self.setStyleSheet("")  # we'll paint manually
+        self.setAttribute(Qt.WA_Hover, True)
+
+    def setSelected(self, sel: bool):
+        if self._selected != sel:
+            self._selected = sel
+            self.update()
+
+    def isSelected(self):
+        return self._selected
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            # Emit a signal instead of assuming parent has a method
+            self.clicked.emit(self)
+            return
+        super().mousePressEvent(event)
+
+    def paintEvent(self, event):  # draws card + inner rectangle representing ratio
+        from PySide6.QtGui import QPainter, QColor, QPen, QBrush
+        painter = QPainter(self)
+        r = self.rect().adjusted(4, 4, -4, -4)
+        bg = QColor(self.theme.COLOR_SURFACE_LIGHT if self._selected else self.theme.COLOR_SURFACE)
+        painter.fillRect(r, bg)
+        # Border
+        pen = QPen(QColor(self.theme.COLOR_PRIMARY if self._selected else self.theme.COLOR_BORDER))
+        pen.setWidth(2 if self._selected else 1)
+        painter.setPen(pen)
+        painter.drawRoundedRect(r, 6, 6)
+
+        # Compute inner preview area based on aspect
+        aw, ah = self.ratio
+        if aw <= 0 or ah <= 0:
+            return
+        avail_w = r.width() - 14
+        avail_h = r.height() - 28
+        scale = min(avail_w / aw, avail_h / ah)
+        pw = int(aw * scale)
+        ph = int(ah * scale)
+        px = r.x() + (r.width() - pw)//2
+        py = r.y() + 10 + (avail_h - ph)//2
+        inner_rect = QRect(px, py, pw, ph)
+        painter.setBrush(QBrush(QColor(self.theme.COLOR_BACKGROUND)))
+        pen2 = QPen(QColor(self.theme.COLOR_PRIMARY if self._selected else self.theme.COLOR_TEXT_SECONDARY))
+        pen2.setWidth(1)
+        painter.setPen(pen2)
+        painter.drawRect(inner_rect)
+
+        # Label below preview
+        painter.setPen(QColor(self.theme.COLOR_TEXT_PRIMARY if self._selected else self.theme.COLOR_TEXT_SECONDARY))
+        label = f"{aw}:{ah}"
+        painter.drawText(r.adjusted(0, ph + 12, 0, 0), Qt.AlignHCenter | Qt.AlignTop, label)
+        painter.end()
+
+
+class NewCanvasDialog(QDialog):
+    """Custom styled dialog with visual aspect ratio templates."""
+    def __init__(self, parent=None, default_name: str = "Untitled", aspects=None):
+        super().__init__(parent)
+        self.setWindowTitle("Create New Canvas")
+        self.setModal(True)
+        self.setObjectName("NewCanvasDialog")
+        self.theme = color_theme
+        if aspects is None:
+            aspects = ImageCanvas.DEFAULT_ASPECTS
+        self._aspects = aspects
+        self._selected_ratio = (1, 1)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(16, 16, 16, 16)
+        outer.setSpacing(12)
+
+        title = QLabel("New Canvas")
+        title.setObjectName("DialogTitle")
+        font = title.font()
+        font.setPointSize(font.pointSize() + 2)
+        font.setBold(True)
+        title.setFont(font)
+        outer.addWidget(title)
+
+        # Name row
+        name_row = QHBoxLayout()
+        name_label = QLabel("Name:")
+        self.name_edit = QLineEdit()
+        self.name_edit.setText(default_name)
+        name_row.addWidget(name_label)
+        name_row.addWidget(self.name_edit, 1)
+        outer.addLayout(name_row)
+
+        # Aspect ratio previews in a scroll area (in case many)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        container = QWidget()
+        grid = QGridLayout(container)
+        grid.setSpacing(10)
+        grid.setContentsMargins(4, 4, 4, 4)
+        self._cards: list[_AspectPreview] = []
+        cols = 4
+        for idx, ratio in enumerate(aspects):
+            card = _AspectPreview(ratio, self.theme, parent=container)
+            self._cards.append(card)
+            row = idx // cols
+            col = idx % cols
+            grid.addWidget(card, row, col)
+            card.clicked.connect(self.aspectCardClicked)
+            if ratio == (1, 1):
+                card.setSelected(True)
+        scroll.setWidget(container)
+        outer.addWidget(scroll, 1)
+
+        # Buttons
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        self.create_btn = QPushButton("Create")
+        self.cancel_btn = QPushButton("Cancel")
+        self.create_btn.clicked.connect(self.accept)
+        self.cancel_btn.clicked.connect(self.reject)
+        btn_row.addWidget(self.cancel_btn)
+        btn_row.addWidget(self.create_btn)
+        outer.addLayout(btn_row)
+
+        self._applyStyles()
+        self.resize(520, 420)
+
+    # Aspect card click handler (called from _AspectPreview)
+    def aspectCardClicked(self, card: _AspectPreview):
+        for c in self._cards:
+            c.setSelected(c is card)
+        self._selected_ratio = card.ratio
+
+    def selectedName(self) -> str:
+        return self.name_edit.text().strip() or "Untitled"
+
+    def selectedAspect(self) -> tuple[int, int]:
+        return self._selected_ratio
+
+    def _applyStyles(self):
+        self.setStyleSheet(
+            f"""
+            QDialog#NewCanvasDialog {{
+                background: {self.theme.COLOR_SURFACE};
+                color: {self.theme.COLOR_TEXT_PRIMARY};
+                border: 1px solid {self.theme.COLOR_BORDER};
+            }}
+            QLabel#DialogTitle {{
+                color: {self.theme.COLOR_TEXT_PRIMARY};
+            }}
+            QLineEdit {{
+                background: {self.theme.COLOR_BACKGROUND};
+                border: 1px solid {self.theme.COLOR_BORDER};
+                padding: 4px 6px;
+                border-radius: 4px;
+                color: {self.theme.COLOR_TEXT_PRIMARY};
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {self.theme.COLOR_PRIMARY};
+            }}
+            QPushButton {{
+                background: {self.theme.COLOR_SURFACE_LIGHT};
+                border: 1px solid {self.theme.COLOR_BORDER};
+                padding: 6px 14px;
+                border-radius: 5px;
+                color: {self.theme.COLOR_TEXT_PRIMARY};
+            }}
+            QPushButton:hover {{ background: {self.theme.COLOR_BACKGROUND_ALT}; }}
+            QPushButton:pressed {{ background: {self.theme.COLOR_BACKGROUND}; }}
+        """
+        )
+
+
 class ImagePane(QWidget):
     def __init__(self):
         super().__init__()
@@ -171,6 +355,22 @@ class ImagePane(QWidget):
         i = self.tabs.currentIndex()
         if 0 <= i < self.tabs.realTabCount():
             self.tabs.setTabText(i, new_name)
+
+    # ---- New Canvas Dialog --------------------------------------------------
+    def promptNewCanvas(self):
+        """Open dialog to gather name & aspect; returns (name, (w,h)) or None on cancel."""
+        default_name = self._nextDefaultLabel()
+        dlg = NewCanvasDialog(self, default_name=default_name, aspects=ImageCanvas.DEFAULT_ASPECTS)
+        if dlg.exec() == QDialog.Accepted:
+            return dlg.selectedName(), dlg.selectedAspect()
+        return None
+
+    def createCanvasViaDialog(self):
+        res = self.promptNewCanvas()
+        if res is None:
+            return None
+        name, aspect = res
+        return self.addNewCanvasTab(name, aspect=aspect)
 
 
 # ---------------------- Custom Tab Bar (presentation-only) -------------------
@@ -346,11 +546,11 @@ class _ImageCanvasTabWidget(QTabWidget):
 
     # ---------- Events --------------------------------------------------------
     def _onPlusClicked(self) -> None:
-        """Bar told us '+' was clicked; ask parent to create a new canvas."""
+        """Bar told us '+' was clicked; show dialog for new canvas parameters."""
         parent = self.parent()
         if isinstance(parent, ImagePane) and hasattr(parent, "tabs") and parent.tabs is self:
-            parent.addNewCanvasTab()
-        # After parent adds, '+' will no longer be the last selected (we never selected it anyway).
+            parent.createCanvasViaDialog()
+        # After possible add, '+' remains last; selection stays on previous tab.
 
     def _onCurrentChanged(self, index: int) -> None:
         """
