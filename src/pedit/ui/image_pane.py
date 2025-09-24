@@ -1,9 +1,10 @@
 
-from PySide6.QtCore import Qt, QRect, QSize, Signal
+from PySide6.QtCore import Qt, QRect, QSize, Signal, QSignalBlocker  
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout,
-    QSizePolicy, QTabWidget, QTabBar, QInputDialog, QPushButton
+    QSizePolicy, QTabWidget, QTabBar, QInputDialog, QPushButton, QToolButton
 )
+# Remove this line; use Signal from PySide6.QtCore instead.
 
 from pedit.core.theme import color_theme
 
@@ -172,13 +173,17 @@ class ImagePane(QWidget):
             self.tabs.setTabText(i, new_name)
 
 
-# ---------------------- Custom Tab Bar (no plus tab) -------------------------
+# ---------------------- Custom Tab Bar (presentation-only) -------------------
 class _ImageCanvasTabBar(QTabBar):
+    """
+    Presentation-only tab bar. It NEVER mutates tabs itself.
+    All add/remove behavior is owned by _ImageCanvasTabWidget.
+    """
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setMovable(True)
-        self.setTabsClosable(True)
-        self.tabCloseRequested.connect(self._onCloseRequested)
+        self.setUsesScrollButtons(True)   # avoid squeezing close buttons off
+        self.setExpanding(False)
 
     def mouseDoubleClickEvent(self, event):
         idx = self.tabAt(event.pos())
@@ -190,48 +195,97 @@ class _ImageCanvasTabBar(QTabBar):
         else:
             super().mouseDoubleClickEvent(event)
 
-    def _onCloseRequested(self, index: int):
-        self.removeTab(index)
-        # If all tabs closed, signal up so widget can create a new one
-        if self.count() == 0:
-            parent = self.parent()
-            if hasattr(parent, "_ensureOneTab"):
-                parent._ensureOneTab()
 
+class _ImageCanvasTabBar(QTabBar):
+    """
+    Presentation-only tab bar. It NEVER mutates tabs itself.
+    Special behavior:
+      - Treat the LAST tab labeled '+' as the add-tab trigger.
+      - Clicking '+' emits plusClicked and DOES NOT change selection.
+    """
+    plusClicked = Signal()
 
-class _ImageCanvasTabWidget(QTabWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setMovable(True)
+        self.setUsesScrollButtons(True)
+        self.setExpanding(False)
+
+    def isPlusIndex(self, index: int) -> bool:
+        return 0 <= index < self.count() and self.tabText(index) == "+"
+
+    def mousePressEvent(self, event):
+        idx = self.tabAt(event.pos())
+        if self.isPlusIndex(idx):
+            # Consume the event and emit signal; do NOT let QTabBar change current tab.
+            self.plusClicked.emit()
+            return
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        idx = self.tabAt(event.pos())
+        if idx != -1 and not self.isPlusIndex(idx):
+            old = self.tabText(idx)
+            new_text, ok = QInputDialog.getText(self, "Rename Tab", "Tab name:", text=old)
+            if ok and new_text.strip():
+                self.setTabText(idx, new_text.strip())
+        else:
+            # Ignore renaming for the '+' tab
+            if not self.isPlusIndex(idx):
+                super().mouseDoubleClickEvent(event)
+
+
+# ---------------------- Custom Tab Widget ( '+' is the last tab ) -----------
+class _ImageCanvasTabWidget(QTabWidget):
+    """
+    QTabWidget with a persistent '+' TAB pinned at the end (non-selecting trigger).
+    - '+' is a real tab visually (so it sits right next to other tabs), but clicking it
+      never changes selection; it emits plusClicked from the bar, and we add a canvas.
+    - You can close the last real tab and end up with only the '+' tab; clicking '+'
+      will add a new canvas immediately.
+    - Parent is expected to implement ImagePane.addNewCanvasTab() which ultimately calls insertCanvasTab().
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+
+        # --- Bar setup ---
         bar = _ImageCanvasTabBar()
         self.setTabBar(bar)
+        self.setElideMode(Qt.ElideRight)  # elide long labels
+        bar.plusClicked.connect(self._onPlusClicked)
+
+        # '+' must stay at the end even after drag reordering
+        self._adjusting_tab_order = False
+        if hasattr(self.tabBar(), "tabMoved"):
+            self.tabBar().tabMoved.connect(self._onTabMoved)
+
+        # --- Widget-owned behaviors ---
         self.setDocumentMode(True)
         self.setMovable(True)
         self.setTabsClosable(True)
         self.tabCloseRequested.connect(self._onClose)
         self.currentChanged.connect(self._onCurrentChanged)
-        # Ensure plus tab stays last even after drag reordering
-        bar.tabMoved.connect(self._onTabMoved)
-        self._adjusting_tab_order = False
 
-        # Add real plus page as last tab (so counts match pages)
+        # --- Create persistent '+' page as last tab ---
         self._plus_page = QWidget()
         super().addTab(self._plus_page, "+")
-        self._stripPlusClose()
+        self._configurePlusTab()
 
-        # Styling (no explicit close-button image so default icon shows)
+        # --- Styling ---
         self.setStyleSheet(
             f"""
             QTabWidget::pane {{ border: 0; }}
             QTabBar::tab {{
                 background: {color_theme.COLOR_SURFACE};
                 color: {color_theme.COLOR_TEXT_SECONDARY};
-                padding: 5px 14px;
+                padding: 5px 18px;           /* room for close button */
                 border: 1px solid {color_theme.COLOR_BORDER};
                 border-bottom: 2px solid {color_theme.COLOR_BACKGROUND_DEEP};
                 border-top-left-radius: 6px;
                 border-top-right-radius: 6px;
                 margin-right: 2px;
                 font-size: 12px;
+                min-width: 88px;             /* keep close button usable when crowded */
             }}
             QTabBar::tab:selected {{
                 background: {color_theme.COLOR_SURFACE_LIGHT};
@@ -239,86 +293,124 @@ class _ImageCanvasTabWidget(QTabWidget):
                 border-bottom: 2px solid {color_theme.COLOR_PRIMARY};
             }}
             QTabBar::tab:!selected:hover {{ background: {color_theme.COLOR_SURFACE_LIGHT}; }}
-            /* Plus tab appearance */
-            QTabBar::tab:last {{
-                min-width: 34px;
-                max-width: 34px;
-                text-align: center;
-                font-weight: 600;
-                color: {color_theme.COLOR_PRIMARY};
-            }}
-            QTabBar::tab:last:selected {{ border-bottom: 2px solid {color_theme.COLOR_PRIMARY}; }}
             """
         )
 
-    # ---------- Plus tab helpers ---------------------------------
-    def plusIndex(self):
-        return self.indexOf(self._plus_page)
+    # ---------- Helpers -------------------------------------------------------
+    def _plusIndex(self) -> int:
+        return self.indexOf(self._plus_page) if hasattr(self, "_plus_page") else -1
 
-    def _stripPlusClose(self):
-        pi = self.plusIndex()
-        if pi != -1:
-            for side in (QTabBar.LeftSide, QTabBar.RightSide):
-                self.tabBar().setTabButton(pi, side, None)
-
-    # Compatibility with previous API (exclude plus page)
-    def realTabCount(self):
-        return self.count() - 1
-
-    def insertCanvasTab(self, canvas: ImageCanvas, label: str):
-        pi = self.plusIndex()
+    def _configurePlusTab(self) -> None:
+        """Make '+' non-closable and pinned at the end."""
+        pi = self._plusIndex()
         if pi == -1:
-            # recreate plus page if somehow missing
+            return
+        # Remove close buttons on '+' explicitly
+        for side in (QTabBar.LeftSide, QTabBar.RightSide):
+            self.tabBar().setTabButton(pi, side, None)
+        self.setTabText(pi, "+")
+        # Keep it last
+        last = self.count() - 1
+        if pi != last:
+            self._adjusting_tab_order = True
+            self.tabBar().moveTab(pi, last)
+            self._adjusting_tab_order = False
+
+    def _ensurePlusTab(self) -> None:
+        """Ensure '+' page exists and is configured/pinned."""
+        if not hasattr(self, "_plus_page") or self._plusIndex() == -1:
             self._plus_page = QWidget()
-            pi = super().addTab(self._plus_page, "+")
-        idx = self.insertTab(pi, canvas, label)
+            super().addTab(self._plus_page, "+")
+        self._configurePlusTab()
+
+    def realTabCount(self) -> int:
+        """Count only actual canvas widgets (ImageCanvas instances)."""
+        c = 0
+        for i in range(self.count()):
+            w = self.widget(i)
+            if w is not self._plus_page and isinstance(w, ImageCanvas):
+                c += 1
+        return c
+
+    def insertCanvasTab(self, canvas: 'ImageCanvas', label: str) -> int:
+        """
+        Insert a new ImageCanvas tab right before the '+' tab and select it.
+        Parent (ImagePane) should call this after creating the canvas.
+        """
+        self._ensurePlusTab()
+        pi = self._plusIndex()
+        idx = self.insertTab(pi, canvas, label) if pi != -1 else self.addTab(canvas, label)
         self.setCurrentIndex(idx)
-        self._stripPlusClose()
+        self._configurePlusTab()
         return idx
 
-    def _onCurrentChanged(self, index: int):
-        if index == self.plusIndex():
-            parent = self.parent()
-            # Guard: during construction ImagePane hasn't yet assigned self.tabs
-            if isinstance(parent, ImagePane) and hasattr(parent, "tabs") and parent.tabs is self:
-                parent.addNewCanvasTab()
+    # ---------- Events --------------------------------------------------------
+    def _onPlusClicked(self) -> None:
+        """Bar told us '+' was clicked; ask parent to create a new canvas."""
+        parent = self.parent()
+        if isinstance(parent, ImagePane) and hasattr(parent, "tabs") and parent.tabs is self:
+            parent.addNewCanvasTab()
+        # After parent adds, '+' will no longer be the last selected (we never selected it anyway).
 
-    def _onTabMoved(self, from_index: int, to_index: int):
-        # After any tab move, force plus tab to remain at last position.
+    def _onCurrentChanged(self, index: int) -> None:
+        """
+        If Qt ever tries to select '+' (e.g., after closing the last canvas),
+        we just ignore it and leave it selected; clicks on '+' still work because
+        the bar emits plusClicked without changing selection.
+        No auto-spawn here: user must click '+' to add a new tab.
+        """
+        # Nothing required; leaving '+' selected is okay since click still triggers via bar.
+
+    def _onTabMoved(self, from_index: int, to_index: int) -> None:
+        """Keep '+' pinned to the end after any move."""
         if self._adjusting_tab_order:
             return
-        pi = self.plusIndex()
+        pi = self._plusIndex()
         if pi == -1:
             return
         last = self.count() - 1
         if pi != last:
-            # Move plus tab back to end
             self._adjusting_tab_order = True
             self.tabBar().moveTab(pi, last)
             self._adjusting_tab_order = False
-            # If user intended to select what they dragged, keep selection on that (unless it was plus)
-            if from_index != pi:
-                # Adjust potential index shift: if from_index was before original plus position and plus moved after, indices stable.
-                # Just ensure we don't auto-select plus.
-                if self.currentIndex() == self.plusIndex():
-                    # Pick nearest non-plus tab
-                    target = max(0, self.plusIndex()-1)
-                    self.setCurrentIndex(target)
 
-    def _onClose(self, index: int):
-        if index == self.plusIndex():
+    def _onClose(self, index: int) -> None:
+        """
+        Close any tab (current or not). When the last real tab is closed,
+        only '+' remains and is still clickable to add a new tab.
+        """
+        w = self.widget(index)
+        if w is None or w is self._plus_page:
             return
-        self.removeTab(index)
-        # If only plus page remains, auto add a new canvas tab
-        if self.realTabCount() == 0:
-            parent = self.parent()
-            if isinstance(parent, ImagePane):
-                parent.addNewCanvasTab()
-        self._stripPlusClose()
+        if not isinstance(w, ImageCanvas):
+            return
 
-    def _ensureOneTab(self):  # kept for compatibility with tab bar call
-        if self.realTabCount() == 0:
-            parent = self.parent()
-            if isinstance(parent, ImagePane):
-                parent.addNewCanvasTab()
+        # Block signals during removal to avoid currentChanged races
+        tb = self.tabBar()
+        was_blocked_self = self.signalsBlocked()
+        was_blocked_tb = tb.signalsBlocked() if tb is not None else False
+        try:
+            self.blockSignals(True)
+            if tb is not None:
+                tb.blockSignals(True)
+            self.removeTab(index)
+        finally:
+            if tb is not None:
+                tb.blockSignals(was_blocked_tb)
+            self.blockSignals(was_blocked_self)
 
+        # Optional: tidy up the widget
+        try:
+            w.deleteLater()
+        except Exception:
+            pass
+
+        self._ensurePlusTab()
+
+        # If some tabs remain, select a sensible neighbor; otherwise, leave only '+'
+        if self.realTabCount() > 0:
+            target = min(index, self.count() - 1)
+            if self.widget(target) is self._plus_page and target - 1 >= 0:
+                target -= 1
+            self.setCurrentIndex(target)
+        # else: zero real tabs -> only '+' present; clicking '+' adds a new one.
