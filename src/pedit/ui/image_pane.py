@@ -125,9 +125,11 @@ class _AspectPreview(QFrame):
         self.setCursor(Qt.PointingHandCursor)
         self.setMinimumSize(88, 74)
         self.setMaximumWidth(110)
-        self.setFrameShape(QFrame.StyledPanel)
+        # Remove any native frame painting to avoid stray border lines
+        self.setFrameShape(QFrame.NoFrame)
         self.setFrameShadow(QFrame.Plain)
         self._selected = False
+        self._hover = False
         self.setStyleSheet("")  # we'll paint manually
         self.setAttribute(Qt.WA_Hover, True)
 
@@ -146,17 +148,36 @@ class _AspectPreview(QFrame):
             return
         super().mousePressEvent(event)
 
+    def enterEvent(self, event):
+        self._hover = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._hover = False
+        self.update()
+        super().leaveEvent(event)
+
     def paintEvent(self, event):  # draws card + inner rectangle representing ratio
         from PySide6.QtGui import QPainter, QColor, QPen, QBrush
         painter = QPainter(self)
         r = self.rect().adjusted(4, 4, -4, -4)
-        bg = QColor(self.theme.COLOR_SURFACE_LIGHT if self._selected else self.theme.COLOR_SURFACE)
-        painter.fillRect(r, bg)
-        # Border
-        pen = QPen(QColor(self.theme.COLOR_PRIMARY if self._selected else self.theme.COLOR_BORDER))
-        pen.setWidth(2 if self._selected else 1)
-        painter.setPen(pen)
-        painter.drawRoundedRect(r, 6, 6)
+        # Background strategy: transparent when idle (no perceived border lines),
+        # subtle tint on hover, solid surface light with outline when selected.
+        if self._selected:
+            bg = QColor(self.theme.COLOR_SURFACE_LIGHT)
+            painter.fillRect(r, bg)
+            pen = QPen(QColor(self.theme.COLOR_PRIMARY))
+            pen.setWidth(2)
+            painter.setPen(pen)
+            painter.drawRoundedRect(r, 6, 6)
+        else:
+            if self._hover:
+                hov = QColor(self.theme.COLOR_SURFACE_LIGHT)
+                hov.setAlpha(120)
+                painter.fillRect(r, hov)
+            # no outer border when not selected
+            painter.setPen(Qt.NoPen)
 
         # Compute inner preview area based on aspect
         aw, ah = self.ratio
@@ -220,6 +241,10 @@ class NewCanvasDialog(QDialog):
         # Aspect ratio previews in a scroll area (in case many)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
+        # Remove any frame/border that can appear at right edge
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
         container = QWidget()
         grid = QGridLayout(container)
         grid.setSpacing(10)
@@ -267,6 +292,11 @@ class NewCanvasDialog(QDialog):
     def _applyStyles(self):
         self.setStyleSheet(
             f"""
+            QLabel{{ 
+                color: {self.theme.COLOR_TEXT_PRIMARY}; 
+                background: transparent;
+                border: none;
+            }}
             QDialog#NewCanvasDialog {{
                 background: {self.theme.COLOR_SURFACE};
                 color: {self.theme.COLOR_TEXT_PRIMARY};
