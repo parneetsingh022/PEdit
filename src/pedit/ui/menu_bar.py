@@ -184,7 +184,7 @@ MENU_STYLESHEET = f"""
         QMenuBar {{
             spacing: 1px;
             padding: 1px 1px;
-            background-color: {color_theme.COLOR_SURFACE};
+            background-color: {color_theme.COLOR_BACKGROUND};
             color: {color_theme.COLOR_TEXT_PRIMARY};
             border-bottom: 1px solid {color_theme.COLOR_BORDER};
         }}
