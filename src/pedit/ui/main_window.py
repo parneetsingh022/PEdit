@@ -9,6 +9,7 @@ from PySide6.QtGui import QAction
 import platform
 import PySide6
 from .side_pane import SidePane
+from .image_pane import ImagePane
 
 # Import package metadata (safe fallback if package not installed editable mode)
 try:
@@ -26,6 +27,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("PEdit")
         self.resize(1000,800)
         side_pane = SidePane()
+        image_pane = ImagePane()
         # Layout: only the side pane + an expanding empty space (stretch).
         # SidePane already has QSizePolicy.Fixed (W) / Expanding (H) so it will
         # occupy full vertical height of the central area.
@@ -33,10 +35,13 @@ class MainWindow(QMainWindow):
         main_layout.setContentsMargins(0,0,0,0)
         main_layout.setSpacing(0)
         main_layout.addWidget(side_pane)
-        main_layout.addStretch(1)
+        # Give the image pane a stretch factor so it consumes all remaining width
+        main_layout.addWidget(image_pane, 1)
+        # Explicit stretch settings for clarity
+        main_layout.setStretchFactor(side_pane, 0)
+        main_layout.setStretchFactor(image_pane, 1)
 
         MainMenu.create_menu(self, MENU_SPEC, stylesheet=MENU_STYLESHEET)
-
         self.setCentralWidget(container)
 
     # ---- Menu action slots -------------------------------------------------
