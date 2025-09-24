@@ -1,6 +1,7 @@
 from PySide6.QtWidgets import QMenu
 from PySide6.QtGui import QIcon, QKeySequence, QAction
 from PySide6 import QtWidgets
+from pedit.core.theme import color_theme
 
 class MainMenu:
     """
@@ -179,32 +180,42 @@ MENU_SPEC = [
     },
 ]
 
-MENU_STYLESHEET = """
-QMenuBar {
-    spacing: 1px;
-    padding: 1px 1px;
-    background-color: #2b2b2b;
-    color: #ffffff;
-}
-QMenuBar::item {
-    spacing: 5px;
-    padding: 4px 10px;
-    background: transparent;
-    color: #ffffff;
-}
-QMenuBar::item:selected { background: #444444; color: #ffffff; }
-QMenuBar::item:pressed  { background: #555555; color: #ffffff; }
+MENU_STYLESHEET = f"""
+        QMenuBar {{
+            spacing: 1px;
+            padding: 1px 1px;
+            background-color: {color_theme.COLOR_SURFACE};
+            color: {color_theme.COLOR_TEXT_PRIMARY};
+            border-bottom: 1px solid {color_theme.COLOR_BORDER};
+        }}
+        QMenuBar::item {{
+            spacing: 5px;
+            padding: 4px 10px;
+            background: transparent;
+            color: {color_theme.COLOR_TEXT_PRIMARY};
+        }}
+        QMenuBar::item:selected {{ 
+            background: {color_theme.COLOR_SURFACE_LIGHT}; 
+            color: {color_theme.COLOR_TEXT_PRIMARY}; 
+        }}
+        QMenuBar::item:pressed  {{ 
+            background: {color_theme.COLOR_PRIMARY}; 
+            color: {color_theme.COLOR_TEXT_PRIMARY}; 
+        }}
 
-QMenu {
-    background-color: #333333;
-    border: 1px solid #555555;
-    color: #ffffff;
-}
-QMenu::item {
-    padding: 4px 20px;
-    background: transparent;
-    color: #ffffff;
-}
-QMenu::item:selected { background: #444444; color: #ffffff; }
-/* Note: QSS can't separately style shortcut vs label */
-"""
+        QMenu {{
+            background-color: {color_theme.COLOR_SURFACE};
+            border: 1px solid {color_theme.COLOR_BORDER};
+            color: {color_theme.COLOR_TEXT_PRIMARY};
+        }}
+        QMenu::item {{
+            padding: 4px 20px;
+            background: transparent;
+            color: {color_theme.COLOR_TEXT_PRIMARY};
+        }}
+        QMenu::item:selected {{ 
+            background: {color_theme.COLOR_PRIMARY}; 
+            color: {color_theme.COLOR_TEXT_PRIMARY}; 
+        }}
+        /* Note: QSS can't separately style shortcut vs label */
+    """
