@@ -1,8 +1,8 @@
 
-from PySide6.QtCore import Qt, QRect, QSize
+from PySide6.QtCore import Qt, QRect, QSize, Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel,
-    QSizePolicy
+    QWidget, QVBoxLayout,
+    QSizePolicy, QTabWidget, QTabBar, QInputDialog, QPushButton
 )
 
 from pedit.core.theme import color_theme
@@ -116,15 +116,16 @@ class ImageCanvas(QWidget):
 class ImagePane(QWidget):
     def __init__(self):
         super().__init__()
-        layout = QVBoxLayout()
+        layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(4)
 
-        self.canvas = ImageCanvas()
-        # Center the canvas; it will internally manage aspect fitting
-        layout.addWidget(self.canvas, stretch=1)
+        # Tab system
+        self.tabs = _ImageCanvasTabWidget(self)
+        layout.addWidget(self.tabs, stretch=1)
 
-        self.setLayout(layout)
+        # Initial tab
+        self.addNewCanvasTab("Untitled 1")
 
         self.setStyleSheet(
             f"background-color: {color_theme.COLOR_BACKGROUND_ALT};"
@@ -135,9 +136,189 @@ class ImagePane(QWidget):
         self.setMinimumHeight(0)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
-    # Convenience API to change aspect ratio from outside
+    # ---- Canvas / Aspect convenience wrappers ------------------------------
+    def currentCanvas(self) -> ImageCanvas | None:
+        w = self.tabs.currentWidget()
+        return w if isinstance(w, ImageCanvas) else None
+
     def setCanvasAspectRatio(self, w: int, h: int):
-        self.canvas.setAspectRatio(w, h)
+        canvas = self.currentCanvas()
+        if canvas:
+            canvas.setAspectRatio(w, h)
+
     def cycleAspectRatio(self):
-        self.canvas.cycleAspectRatio()
+        canvas = self.currentCanvas()
+        if canvas:
+            canvas.cycleAspectRatio()
+
+    # ---- Tab management -----------------------------------------------------
+    def addNewCanvasTab(self, label: str | None = None, aspect=(1,1)):
+        canvas = ImageCanvas(aspect_ratio=aspect)
+        idx = self.tabs.insertCanvasTab(canvas, label or self._nextDefaultLabel())
+        self.tabs.setCurrentIndex(idx)
+        return canvas
+
+    def _nextDefaultLabel(self):
+        base = "Untitled"
+        existing = [self.tabs.tabText(i) for i in range(self.tabs.realTabCount())]
+        n=1
+        while f"{base} {n}" in existing:
+            n+=1
+        return f"{base} {n}"
+
+    def renameCurrentTab(self, new_name: str):
+        i = self.tabs.currentIndex()
+        if 0 <= i < self.tabs.realTabCount():
+            self.tabs.setTabText(i, new_name)
+
+
+# ---------------------- Custom Tab Bar (no plus tab) -------------------------
+class _ImageCanvasTabBar(QTabBar):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setMovable(True)
+        self.setTabsClosable(True)
+        self.tabCloseRequested.connect(self._onCloseRequested)
+
+    def mouseDoubleClickEvent(self, event):
+        idx = self.tabAt(event.pos())
+        if idx != -1:
+            old = self.tabText(idx)
+            new_text, ok = QInputDialog.getText(self, "Rename Tab", "Tab name:", text=old)
+            if ok and new_text.strip():
+                self.setTabText(idx, new_text.strip())
+        else:
+            super().mouseDoubleClickEvent(event)
+
+    def _onCloseRequested(self, index: int):
+        self.removeTab(index)
+        # If all tabs closed, signal up so widget can create a new one
+        if self.count() == 0:
+            parent = self.parent()
+            if hasattr(parent, "_ensureOneTab"):
+                parent._ensureOneTab()
+
+
+class _ImageCanvasTabWidget(QTabWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        bar = _ImageCanvasTabBar()
+        self.setTabBar(bar)
+        self.setDocumentMode(True)
+        self.setMovable(True)
+        self.setTabsClosable(True)
+        self.tabCloseRequested.connect(self._onClose)
+        self.currentChanged.connect(self._onCurrentChanged)
+        # Ensure plus tab stays last even after drag reordering
+        bar.tabMoved.connect(self._onTabMoved)
+        self._adjusting_tab_order = False
+
+        # Add real plus page as last tab (so counts match pages)
+        self._plus_page = QWidget()
+        super().addTab(self._plus_page, "+")
+        self._stripPlusClose()
+
+        # Styling (no explicit close-button image so default icon shows)
+        self.setStyleSheet(
+            """
+            QTabWidget::pane { border: 0; }
+            QTabBar::tab {
+                background: #2d2d2d;
+                color: #d0d0d0;
+                padding: 5px 14px;
+                border: 1px solid #3f3f3f;
+                border-bottom: 2px solid #1e1e1e;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                margin-right: 2px;
+                font-size: 12px;
+            }
+            QTabBar::tab:selected {
+                background: #3a3a3a;
+                color: #ffffff;
+                border-bottom: 2px solid #4aa3ff;
+            }
+            QTabBar::tab:!selected:hover { background: #353535; }
+            /* Plus tab appearance */
+            QTabBar::tab:last {
+                min-width: 34px;
+                max-width: 34px;
+                text-align: center;
+                font-weight: 600;
+                color: #5ec6ff;
+            }
+            QTabBar::tab:last:selected { border-bottom: 2px solid #5ec6ff; }
+            """
+        )
+
+    # ---------- Plus tab helpers ---------------------------------
+    def plusIndex(self):
+        return self.indexOf(self._plus_page)
+
+    def _stripPlusClose(self):
+        pi = self.plusIndex()
+        if pi != -1:
+            for side in (QTabBar.LeftSide, QTabBar.RightSide):
+                self.tabBar().setTabButton(pi, side, None)
+
+    # Compatibility with previous API (exclude plus page)
+    def realTabCount(self):
+        return self.count() - 1
+
+    def insertCanvasTab(self, canvas: ImageCanvas, label: str):
+        pi = self.plusIndex()
+        if pi == -1:
+            # recreate plus page if somehow missing
+            self._plus_page = QWidget()
+            pi = super().addTab(self._plus_page, "+")
+        idx = self.insertTab(pi, canvas, label)
+        self.setCurrentIndex(idx)
+        self._stripPlusClose()
+        return idx
+
+    def _onCurrentChanged(self, index: int):
+        if index == self.plusIndex():
+            parent = self.parent()
+            # Guard: during construction ImagePane hasn't yet assigned self.tabs
+            if isinstance(parent, ImagePane) and hasattr(parent, "tabs") and parent.tabs is self:
+                parent.addNewCanvasTab()
+
+    def _onTabMoved(self, from_index: int, to_index: int):
+        # After any tab move, force plus tab to remain at last position.
+        if self._adjusting_tab_order:
+            return
+        pi = self.plusIndex()
+        if pi == -1:
+            return
+        last = self.count() - 1
+        if pi != last:
+            # Move plus tab back to end
+            self._adjusting_tab_order = True
+            self.tabBar().moveTab(pi, last)
+            self._adjusting_tab_order = False
+            # If user intended to select what they dragged, keep selection on that (unless it was plus)
+            if from_index != pi:
+                # Adjust potential index shift: if from_index was before original plus position and plus moved after, indices stable.
+                # Just ensure we don't auto-select plus.
+                if self.currentIndex() == self.plusIndex():
+                    # Pick nearest non-plus tab
+                    target = max(0, self.plusIndex()-1)
+                    self.setCurrentIndex(target)
+
+    def _onClose(self, index: int):
+        if index == self.plusIndex():
+            return
+        self.removeTab(index)
+        # If only plus page remains, auto add a new canvas tab
+        if self.realTabCount() == 0:
+            parent = self.parent()
+            if isinstance(parent, ImagePane):
+                parent.addNewCanvasTab()
+        self._stripPlusClose()
+
+    def _ensureOneTab(self):  # kept for compatibility with tab bar call
+        if self.realTabCount() == 0:
+            parent = self.parent()
+            if isinstance(parent, ImagePane):
+                parent.addNewCanvasTab()
 
